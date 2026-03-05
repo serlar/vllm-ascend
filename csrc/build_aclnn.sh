@@ -46,6 +46,10 @@ elif [[ "$SOC_VERSION" =~ ^ascend910_93 ]]; then
     fi
     # for dispatch_gmm_combine_decode
     yes | cp "${HCCL_STRUCT_FILE_PATH}" "${ROOT_DIR}/csrc/utils/inc/kernel"
+    # for dispatch_ffn_combine_w4a8
+    SCRIPT_DIR_W4A8=$(cd "$(dirname "$0")" && pwd)
+    TARGET_DIR_W4A8="$SCRIPT_DIR_W4A8/dispatch_ffn_combine_w4_a8/op_kernel/utils/"
+    TARGET_FILE_W4A8="$TARGET_DIR_W4A8/$(basename "$HCCL_STRUCT_FILE_PATH")"
     # for dispatch_ffn_combine
     SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
     TARGET_DIR="$SCRIPT_DIR/dispatch_ffn_combine/op_kernel/utils/"
@@ -58,30 +62,35 @@ elif [[ "$SOC_VERSION" =~ ^ascend910_93 ]]; then
     echo "*************************************"
     echo $HCCL_STRUCT_FILE_PATH
     echo "$TARGET_DIR"
+    echo "$TARGET_DIR_W4A8"
+    cp "$HCCL_STRUCT_FILE_PATH" "$TARGET_DIR_W4A8"
     cp "$HCCL_STRUCT_FILE_PATH" "$TARGET_DIR"
     cp "$HCCL_STRUCT_FILE_PATH" "$TARGET_DIR_BF16"
 
+    sed -i 's/struct HcclOpResParam {/struct HcclOpResParamCustom {/g' "$TARGET_FILE_W4A8"
+    sed -i 's/struct HcclRankRelationResV2 {/struct HcclRankRelationResV2Custom {/g' "$TARGET_FILE_W4A8"
     sed -i 's/struct HcclOpResParam {/struct HcclOpResParamCustom {/g' "$TARGET_FILE"
     sed -i 's/struct HcclRankRelationResV2 {/struct HcclRankRelationResV2Custom {/g' "$TARGET_FILE"
     sed -i 's/struct HcclOpResParam {/struct HcclOpResParamCustom {/g' "$TARGET_FILE_BF16"
     sed -i 's/struct HcclRankRelationResV2 {/struct HcclRankRelationResV2Custom {/g' "$TARGET_FILE_BF16"
 
     CUSTOM_OPS_ARRAY=(
-        "grouped_matmul_swiglu_quant_weight_nz_tensor_list"
-        "lightning_indexer_vllm"
-        "sparse_flash_attention"
-        "dispatch_ffn_combine"
-        "dispatch_ffn_combine_bf16"
-        "dispatch_gmm_combine_decode"
-        "moe_combine_normal"
-        "moe_dispatch_normal"
-        "dispatch_layout"
-        "notify_dispatch"
-        "moe_init_routing_custom"
-        "moe_gating_top_k"
-        "add_rms_norm_bias"
-        "apply_top_k_top_p_custom"
-        "transpose_kv_cache_by_block"
+        # "grouped_matmul_swiglu_quant_weight_nz_tensor_list"
+        # "lightning_indexer_vllm"
+        # "sparse_flash_attention"
+        "dispatch_ffn_combine_w4_a8"
+        # "dispatch_ffn_combine"
+        # "dispatch_ffn_combine_bf16"
+        # "dispatch_gmm_combine_decode"
+        # "moe_combine_normal"
+        # "moe_dispatch_normal"
+        # "dispatch_layout"
+        # "notify_dispatch"
+        # "moe_init_routing_custom"
+        # "moe_gating_top_k"
+        # "add_rms_norm_bias"
+        # "apply_top_k_top_p_custom"
+        # "transpose_kv_cache_by_block"
     )
     CUSTOM_OPS=$(IFS=';'; echo "${CUSTOM_OPS_ARRAY[*]}")
     SOC_ARG="ascend910_93"

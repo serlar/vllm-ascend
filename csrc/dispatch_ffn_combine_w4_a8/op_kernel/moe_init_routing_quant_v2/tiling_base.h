@@ -1,6 +1,8 @@
 #pragma once
+
 #ifndef ASCENDC_DISPATCH_FFN_COMBINE_TILING_BASE_H
 #define ASCENDC_DISPATCH_FFN_COMBINE_TILING_BASE_H
+
 namespace optiling {
 struct AiCoreParams {
     uint64_t ubSize;
@@ -66,4 +68,5 @@ public:
 };
 
 }
+
 #endif
