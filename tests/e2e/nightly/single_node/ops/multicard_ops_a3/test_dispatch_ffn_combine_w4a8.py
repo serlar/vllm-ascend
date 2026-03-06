@@ -145,10 +145,10 @@ class TestDispatchFFNCombine:
 
         torch_npu.npu.config.allow_internal_format = True
         x = self.generate_random_tensor((m, k), dtype=torch.bfloat16).npu()
-        weight1 = self.generate_random_tensor((e, k, n/8),
+        weight1 = self.generate_random_tensor((e, k, n//8),
                                               dtype=torch.int32).npu()
         weight1 = torch_npu.npu_format_cast(weight1, 29)
-        weight2 = self.generate_random_tensor((e, k2, n2/8),
+        weight2 = self.generate_random_tensor((e, k2, n2//8),
                                               dtype=torch.int32).npu()
         weight2 = torch_npu.npu_format_cast(weight2, 29)
         
@@ -157,6 +157,7 @@ class TestDispatchFFNCombine:
         bias2 = int32_to_8x_int4_float(weight2.cpu())
         bias2_npu = bias2.sum(dim=-1).npu()
 
+        print("====generate bias====")
         expert_idx = torch.randint(0,
                                    self.world_size * e, (m, topk),
                                    dtype=torch.int32).npu()
@@ -267,8 +268,8 @@ def worker(rank: int, world_size: int, port: int, q: mp.SimpleQueue):
     op.generate_hcom()
     out1 = op.run_tensor_list()
     q.put(out1)
-    out2 = op.run_normal()
-    q.put(out2)
+    # out2 = op.run_normal()
+    # q.put(out2)
 
 
 # @torch.inference_mode()

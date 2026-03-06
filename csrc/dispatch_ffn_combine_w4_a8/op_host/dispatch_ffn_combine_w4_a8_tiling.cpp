@@ -94,8 +94,13 @@ static ge::graphStatus DispatchFFNCombineW4A8CheckShapeAndSetTiling(gert::Tiling
     uint32_t K = aStorageShape->GetStorageShape().GetDim(1);
 
     auto wTensor = context->GetDynamicInputTensor(WEIGHT_INDEX, 0);
+    auto wDataType = wTensor->GetDataType();
     uint32_t wTensorDims = wTensor->GetOriginShape().GetDimNum();
     uint32_t N = wTensor->GetStorageShape().GetDim(wTensorDims - 1);
+    if(ge::DT_INT32 == wDataType)
+    {
+        N = N * 8;
+    }
 
     uint32_t topK = expertIdxTensor->GetStorageShape().GetDim(1);
     uint32_t listLen = 0;

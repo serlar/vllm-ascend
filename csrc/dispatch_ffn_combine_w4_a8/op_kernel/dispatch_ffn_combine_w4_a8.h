@@ -197,8 +197,8 @@ __aicore__ inline void DispatchFFNCombineW4A8<TemplateMMA2ACFunc>::Process()
         typename std::conditional<TB_, layout::ColumnMajor, layout::RowMajor>::type
     >::type;
 
-    LayoutB layoutB1 = LayoutBInitializer<LayoutB, BType_>::create(k, n);
-    LayoutB layoutB2 = LayoutBInitializer<LayoutB, BType_>::create(k2, n2);
+    LayoutB layoutB1 = LayoutBInitializer<LayoutB, AscendC::int4b_t>::create(k, n);
+    LayoutB layoutB2 = LayoutBInitializer<LayoutB, AscendC::int4b_t>::create(k2, n2);
     using LayoutC = layout::RowMajor;
     using L1TileShape = GemmShape<128, 256, 1024>;  // M, N, K
 
