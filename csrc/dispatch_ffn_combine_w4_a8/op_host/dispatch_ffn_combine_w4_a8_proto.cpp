@@ -22,10 +22,12 @@ const size_t ATTR_RANK_SIZE = 1;
 const size_t SUPPORT_DIM_SIZE = 2;
 
 static ge::graphStatus InferShapeDispatchFFNCombineW4A8(gert::InferShapeContext* context) {
+  (void) context;
   return ge::GRAPH_SUCCESS;
 }
 
 static ge::graphStatus InferDataTypeDispatchFFNCombineW4A8(gert::InferDataTypeContext* context) {
+  (void) context;
   return ge::GRAPH_SUCCESS;
 }
 

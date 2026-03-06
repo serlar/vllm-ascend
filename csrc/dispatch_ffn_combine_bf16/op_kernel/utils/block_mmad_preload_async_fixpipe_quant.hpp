@@ -91,6 +91,7 @@ public:
     using CopyGmToL1A = typename TileCopy_::CopyGmToL1A;
     using CopyGmToL1B = typename TileCopy_::CopyGmToL1B;
     using CopyGmToL1S = Gemm::Tile::CopyGmToL1<ArchTag, Gemm::GemmType<uint64_t, layout::VectorLayout>>;
+    using CopyL1ToFP = typename Gemm::Tile::QuantTileCopy<ArchTag, AType_, BType_, CType_, void, Catlass::Gemm::Tile::ScaleGranularity::PER_CHANNEL>::CopyL1ToFP;
     using CopyL1ToL0A = typename TileCopy_::CopyL1ToL0A;
     using CopyL1ToL0B = typename TileCopy_::CopyL1ToL0B;
     
@@ -153,10 +154,11 @@ public:
         L1TileShape::K, L1TileShape::N);
 
     CATLASS_DEVICE
-    BlockMmad(Arch::Resource<ArchTag> &resource, uint32_t l1BufAddrStart = 0)
+    BlockMmad(Arch::Resource<ArchTag> &resource, uint32_t l1BufAddrStart = 0, uint32_t FpAddrStart = 0)
     {
         syncGroupIdx = 0;
         InitL1(resource, l1BufAddrStart);
+        InitFpBuf(resource, FpAddrStart);
         InitL0A(resource);
         InitL0B(resource);
         InitL0C(resource);
@@ -318,6 +320,13 @@ private:
     }
 
     CATLASS_DEVICE
+    void InitFpBuf(Arch::Resource<ArchTag> &resource, uint32_t FpAddrStart)
+    {
+        uint32_t FpOffset = FpAddrStart;
+        fixpipeBuf = resource.fpBuf.template GetBufferByByte<uint64_t>(FpOffset);
+    }
+
+    CATLASS_DEVICE
     void InitL0A(Arch::Resource<ArchTag> &resource)
     {
         for (uint32_t i = 0; i < L0A_STAGES; ++i) {
@@ -442,6 +451,10 @@ private:
                 copyGmToL1S(l1STensor, params.gmBlockS, layoutTileS, layoutTileS);
                 AscendC::SetFlag<AscendC::HardEvent::MTE2_FIX>(0);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE2_FIX>(0);
+
+                copyL1ToFP(fixpipeBuf, l1STensor, layoutTileS, layoutTileS);
+                AscendC::SetFlag<AscendC::HardEvent::FIX_MTE2>(0);
+                AscendC::PipeBarrier<PIPE_FIX>();
             }
             if constexpr (!ENABLE_UNIT_FLAG) {
                 AscendC::SetFlag<AscendC::HardEvent::M_FIX>(l0CEventList[l0CListId]);
@@ -460,12 +473,12 @@ private:
                 }
             }
             l0CListId = (l0CListId + 1 < L0C_STAGES) ? (l0CListId + 1) : 0;
-            if constexpr (std::is_same_v<ElementA, int8_t>) {
-                AscendC::SetFlag<AscendC::HardEvent::FIX_MTE2>(0);
-            }
             Finalize(params.syncLoopIdx, params.flag);
         }
     }
+
+    AscendC::LocalTensor<uint64_t> fixpipeBuf;
+
     AscendC::LocalTensor<ElementA> l1ATensorList[L1_STAGES];
     AscendC::LocalTensor<ElementB> l1BTensorList[L1_STAGES];
     AscendC::LocalTensor<uint64_t> l1STensor;
@@ -497,6 +510,7 @@ private:
     CopyL1ToL0A copyL1ToL0A;
     CopyL1ToL0B copyL1ToL0B;
     CopyL0CToGm copyL0CToGm;
+    CopyL1ToFP copyL1ToFP;
 };
 
 }  // namespace Catlass::Gemm::Block

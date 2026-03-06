@@ -25,7 +25,6 @@
 #ifndef HCCL_COMM
     #include "block_mmad_preload_async_fixpipe_quant.hpp"
     #include "copy_gm_to_l1_custom.hpp"
-    #include "copy_l0c_to_gm_custom.hpp"
     #include "block_epilogue_pertoken_row.hpp"
     #include "block_epilogue_pertoken_v2.hpp"
     #include "block_epilogue_pertoken_swiglu.hpp"
@@ -41,7 +40,6 @@
 #else
     #include "utils/block_mmad_preload_async_fixpipe_quant.hpp"
     #include "utils/copy_gm_to_l1_custom.hpp"
-    #include "utils/copy_l0c_to_gm_custom.hpp"
     #include "utils/block_epilogue_pertoken_row.hpp"
     #include "utils/block_epilogue_pertoken_v2.hpp"
     #include "utils/block_epilogue_pertoken_swiglu.hpp"
