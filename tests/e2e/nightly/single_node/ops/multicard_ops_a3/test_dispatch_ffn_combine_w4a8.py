@@ -180,6 +180,7 @@ class TestDispatchFFNCombine:
         out = self.generate_random_tensor((m, k), dtype=torch.bfloat16).npu()
         expert_token_nums = self.generate_random_tensor((1, e), dtype=torch.int32).npu()
 
+        print(f"[Rank {self.rank}] 算子开始执行，输出张量前5个元素：{out[:5, 0].cpu().tolist()}")
         torch.ops._C_ascend.dispatch_ffn_combine(
             x=x,
             weight1=weight1_nz_npu,
@@ -195,6 +196,8 @@ class TestDispatchFFNCombine:
             out=out,
             expert_token_nums=expert_token_nums,
         )
+        
+        print(f"[Rank {self.rank}] 算子执行成功，输出张量前5个元素：{out[:5, 0].cpu().tolist()}")
         return True
 
     def run_normal(self) -> bool:
@@ -292,4 +295,4 @@ results = [q.get() for _ in range(world_size)]
 for p in p_list:
     p.join()
 
-assert all(results)
+assert all(results), f"部分进程执行失败！结果: {results}"

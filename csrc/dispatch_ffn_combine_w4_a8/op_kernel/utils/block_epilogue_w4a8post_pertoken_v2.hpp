@@ -33,7 +33,6 @@ public:
     using ElementD = typename DType_::Element;
     using LayoutD = typename DType_::Layout;
 
-    //using CopyScaleGmToUb = Epilogue::Tile::CopyGm2Ub<ArchTag, Gemm::GemmType<float, layout::RowMajor>>;
     using CopyScaleGmToUb = Epilogue::Tile::CopyGm2Ub<ArchTag, Gemm::GemmType<float, layout::VectorLayout>>;
     // Tile copy
     using CopyGmToUbC = typename TileCopy_::CopyGmToUbC;
@@ -108,11 +107,9 @@ public:
         ubOffset += max_len * sizeof(float);
 
         tokenPerExpert.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(params.ptrTokenPerExpert));
-        tokenPerExpertLayout = Layout3D(params.EP * params.expertPerRank, params.expertPerRank);
+        tokenPerExpertLayout = Layout3D(AlignUp(params.EP * params.expertPerRank, 128), params.expertPerRank);
         is_ping = true;
-#ifdef ENABLE_PRINT
         rankIdx = params.rank;
-#endif
     }
 
     CATLASS_DEVICE
@@ -145,8 +142,7 @@ public:
     void operator()(AscendC::GlobalTensor<float> const &gmGMM2, AscendC::GlobalTensor<ElementC> const &gmC,
                     AscendC::GlobalTensor<ElementPerTokenScale> const &gmPerTokenScale,
                     AscendC::GlobalTensor<float> const &weightAux, GemmCoord &blockCoord, GemmCoord &actualBlockShape,
-                    int32_t groupIdx, int32_t preSrcExpertSum, AscendC::GlobalTensor<int32_t> preSumBeforeRank,
-                    uint32_t *mPreSumBeforeRank)
+                    int32_t groupIdx, int32_t preSrcExpertSum, AscendC::GlobalTensor<int32_t> preSumBeforeRank)
     {
         auto &ubCH = ubCHList[ubListId];
         auto &ubCL = ubCLList[ubListId];
@@ -161,12 +157,6 @@ public:
 #ifdef W4A8_DEBUG
         int32_t gmCOffset = (preSrcExpertSum * params.n2 + blockCoord.m() * params.n2) / 2 + blockCoord.n();
         auto gmTileGMM2 = gmGMM2[gmCOffset];
-#ifdef ENABLE_PRINT
-        if(rankIdx == 0)
-        {
-            cce::printf("gmCOffset: %d preSrcExpertSum: %d\n", gmCOffset, preSrcExpertSum);
-        }
-#endif
 #endif
 
         constexpr float DEFAULT_MUL_SCALE = 16.0f;
@@ -239,7 +229,7 @@ public:
 
         for (int32_t dstEpIdx = 0; dstEpIdx < params.EP; dstEpIdx++) {
             int32_t lenRankInExpert = tokenPerExpert(tokenPerExpertLayout(dstEpIdx, params.rank, groupIdx));
-            int32_t dstExpertOffset = preSumBeforeRank(dstEpIdx * 16);
+            int32_t dstExpertOffset = preSumBeforeRank(dstEpIdx * params.expertPerRank + groupIdx);
             int32_t stRankInExpert = preSumRankInExpert;
             int32_t edRankInExpert = stRankInExpert + lenRankInExpert;
             preSumRankInExpert += lenRankInExpert;
@@ -262,7 +252,7 @@ public:
             AscendC::GlobalTensor<ElementD> gmRemotePeer;
             __gm__ void *dstPeermemPtr = params.shmem(params.offsetD, dstEpIdx);
             gmRemotePeer.SetGlobalBuffer(reinterpret_cast<__gm__ ElementD *>(dstPeermemPtr));
-            MatrixCoord dstOffset{dstOffsetInExpert + dstExpertOffset + mPreSumBeforeRank[dstEpIdx], blockCoord.n()};
+            MatrixCoord dstOffset{dstOffsetInExpert + dstExpertOffset, blockCoord.n()};
             int64_t gmDstOffset = params.layoutC.GetOffset(dstOffset);
             auto gmTileD = gmRemotePeer[gmDstOffset];
             LayoutC layoutGM2{lenData, actualBlockShape.n(), params.n2};
@@ -307,9 +297,7 @@ private:
     AscendC::GlobalTensor<int32_t> tokenPerExpert;
     Layout3D tokenPerExpertLayout;
 
-#ifdef ENABLE_PRINT
     int32_t rankIdx;
-#endif
 };
 }
 #endif

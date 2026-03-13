@@ -38,6 +38,7 @@
 
 
 using namespace AscendC;
+// #define SYNC_MODE
 
 namespace Catlass::Gemm::Kernel {
 
@@ -211,8 +212,18 @@ public:
     template <>
     CATLASS_DEVICE void operator()<AscendC::AIC>(Params const &params)
     {
+#ifdef SYNC_MODE
+        AscendC::SyncAll<false>();
+#endif
         GMM1(params);
+#ifdef SYNC_MODE
+        AscendC::SyncAll<false>();
+        AscendC::SyncAll<false>();
+#endif
         GMM2(params);
+#ifdef SYNC_MODE
+        AscendC::SyncAll<false>();
+#endif
     }
 
     template <>
@@ -259,7 +270,7 @@ private:
         tokenPerExpert.SetGlobalBuffer(
             reinterpret_cast<__gm__ int32_t *>(shmem() + peermemInfo.offsetPeerTokenPerExpert));
 
-        tokenPerExpertLayout = Layout3D(params.EP * params.expertPerRank, params.expertPerRank);
+        tokenPerExpertLayout = Layout3D(AlignUp(params.EP * params.expertPerRank, ALIGN_128), params.expertPerRank);
         preSumBeforeRank.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(workspaceInfo.ptrSumBeforeRank));
     }
 
@@ -504,8 +515,6 @@ private:
 
         syncgmmIdx++;
         AscendC::GlobalTensor<ElementB> gmB1;
-        // gmB1.SetGlobalBuffer(params.ptrB1);
-        // gmB1_I8.SetGlobalBuffer(reinterpret_cast<__gm__ int8_t *>(params.ptrB1));
 
         for (uint32_t groupIdx = 0; groupIdx < params.expertPerRank; ++groupIdx) {
             uint32_t currentM = cumsumMM((params.EP - 1) * params.expertPerRank + groupIdx);
@@ -612,11 +621,6 @@ private:
 
         int64_t preCurrentmSum = 0;
         int32_t syncLoopIdx = -1;
-        // uint32_t lastDequantExpertNum = params.expertPerRank;
-
-        // if (params.epilogueGranularity < params.expertPerRank) {
-        //     lastDequantExpertNum = params.expertPerRank - params.epilogueGranularity;
-        // }
 
         for (uint32_t groupIdx = 0; groupIdx < params.expertPerRank; ++groupIdx) {
             uint32_t currentM = cumsumMM((params.EP - 1) * params.expertPerRank + groupIdx);
@@ -650,12 +654,9 @@ private:
 
             // Determine the starting loopIdx of the current core under the current groupIdx
             uint32_t startLoopIdx = ((coreIdx < startCoreIdx) ? (coreIdx + coreNum) : coreIdx) - startCoreIdx;
-
-            if(IsSyncTask(groupIdx, params.expertPerRank))
-            {
-            AscendC::CrossCoreWaitFlag<0x2>(SYNCFLAGV2C);  // GMM2等swigluquant
+            if(groupIdx == 0 || IsSyncTask(groupIdx - 1, params.expertPerRank)) {
+                AscendC::CrossCoreWaitFlag<0x2>(SYNCFLAGV2C);  // GMM2等swigluquant
             }
-
             for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
                 if (loopIdx + coreNum >= coreLoops) {
                     syncLoopIdx = groupIdx;
@@ -679,11 +680,7 @@ private:
                             blockMmad(gmS2[gmOffsetS], layoutScale, gmA2I4[gmGroupOffsetA + gmOffsetA], layoutA,
                                       gmB2[gmGroupOffsetB + gmOffsetB], layoutB2, gmC2[gmGroupOffsetC + gmOffsetC],
                                       layoutC, actualBlockShape, Callback{}, Callback{}, syncLoopIdx, 0);
-                        } else {
-                            blockMmad(gmS2[gmOffsetS], layoutScale, gmA2I4[gmGroupOffsetA + gmOffsetA], layoutA,
-                                      gmB2[gmGroupOffsetB + gmOffsetB], layoutB2, gmC2[gmGroupOffsetC + gmOffsetC],
-                                      layoutC, actualBlockShape);
-                        }
+                        } 
                     }
                 }
             }
@@ -698,6 +695,7 @@ private:
         }
         if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
             blockMmad.SynchronizeBlock();
+            blockMmad.Finalize(params.expertPerRank - 1, 0);
         }
     }
 
@@ -903,7 +901,7 @@ private:
             localTokenPerExpert, params.expertTokensBeforeCapacity, shmem() + peermemInfo.offsetPeerPerTokenScale,
             params.ptrWorkspace + expandedRowIdxOffset, &params.moeInitRoutingQuantV2TilingData,
             params.initRoutingQuantTilingKey);
-
+        
         AscendC::SyncAll<true>();
 
         CrossRankSyncAndlocalTokenPerExpertAllGatherAndGetSumPreRankV2(params, localTokenPerExpertOffset);
@@ -982,6 +980,9 @@ private:
                 dequantSum[nSyncSwiglu] = dequantSumTemp;
             }
         }
+#ifdef SYNC_MODE
+        AscendC::SyncAll<false>();
+#endif
 
         uint32_t n2 = params.problemShape.k();
 
@@ -999,14 +1000,13 @@ private:
         uint32_t n = params.problemShape.n();
         BlockEpilogue2 blockEpilogue2(resource, epilogueParams);
         BlockEpilogue1 blockEpilogue1(resource, n);
-
+#ifdef SYNC_MODE
+        AscendC::SyncAll<false>();
+#endif
         for(int32_t syncIdx = 0; syncIdx < nSyncSwiglu; syncIdx++)
         {
             AscendC::CrossCoreWaitFlag<0x2>(SYNCFLAGC2V);
             AscendC::SyncAll<true>();
-            #ifdef ENABLE_TIMER
-            int32_t groupIdx = params.expertPerRank - (1 << (nSyncSwiglu - syncIdx - 1));
-            #endif
             uint32_t curRowNum = dequantSum[syncIdx+1] - dequantSum[syncIdx];
             if(curRowNum > 0)
             {
@@ -1018,9 +1018,9 @@ private:
                 int64_t gmOffsetD = params.layoutD1.GetOffset(offsetC);
                 if constexpr (std::is_same_v<ElementB, AscendC::int4b_t>) {
                     blockEpilogue1(gmC[gmOffsetC * 2], shapeC, gmPerTokenScale1[rowStartThisCore], gmWeightAux1,
-                                   gmA2I4_I8[gmOffsetD], cumsumMM, rowStartThisCore, gmPerTokenScale2[rowStartThisCore],
-                                   params.expertPerRank, params.EP, gmCGMM1[gmOffsetC], params.rank,
-                                   params.epilogueCoreNum);
+                                    gmA2I4_I8[gmOffsetD], cumsumMM, rowStartThisCore, gmPerTokenScale2[rowStartThisCore],
+                                    params.expertPerRank, params.EP, gmCGMM1[gmOffsetC], params.rank,
+                                    params.epilogueCoreNum);
                 }
             }
             AscendC::SyncAll<true>();
@@ -1028,6 +1028,10 @@ private:
             AscendC::CrossCoreSetFlag<0x2, PIPE_MTE3>(SYNCFLAGV2C);
         }
         blockEpilogue1.Finalize();
+#ifdef SYNC_MODE
+        AscendC::SyncAll<false>();
+        AscendC::SyncAll<false>();
+#endif
 
         CombineV2(params, blockEpilogue2);
         AscendC::SyncAll<true>();
@@ -1081,6 +1085,7 @@ private:
         int64_t gmGroupOffsetC = 0;
         uint32_t aivCoreNum = coreNum;
         uint32_t aivCoreIdx = coreIdx;
+
         icache_preload(8);
         for (uint32_t groupIdx = 0; groupIdx < params.expertPerRank; ++groupIdx) {
             uint32_t currentExpertM = cumsumMM((params.EP - 1) * params.expertPerRank + groupIdx);
@@ -1128,15 +1133,11 @@ private:
                     }
                     GemmCoord realTileShape{actualm, actualBlockShape.n(), 1};
                     blockEpilogue(gmCGMM2, gmC2, gmPerTokenScale2, gmWeightAux2, realTileCoord, realTileShape, groupIdx,
-                                  preSrcExpertSum, preSumBeforeRank, mPreSumBeforeRank);
+                                  preSrcExpertSum, preSumBeforeRank);
                     m_offset += m0;
                 }
             }
 
-            for (int32_t dstEpIdx = 0; dstEpIdx < params.EP; dstEpIdx++) {
-                int32_t expertRankM = tokenPerExpert(tokenPerExpertLayout(dstEpIdx, params.rank, groupIdx));
-                mPreSumBeforeRank[dstEpIdx] += expertRankM;
-            }
             preSrcExpertSum += currentExpertM;
             startCoreIdx = (startCoreIdx + coreLoops) % aicCoreNum;
         }
@@ -1277,7 +1278,6 @@ private:
     PeermemInfo peermemInfo;
 
     int64_t m_prevSumBeforeRank;
-    uint32_t mPreSumBeforeRank[32] = {0};
     uint32_t dequantSum[16] = {0};
 
     // AscendC::GlobalTensor<ElementABefore> gmA;

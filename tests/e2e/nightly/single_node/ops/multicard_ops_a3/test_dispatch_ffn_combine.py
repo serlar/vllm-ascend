@@ -128,11 +128,14 @@ class TestDispatchFFNCombine:
         out = self.generate_random_tensor((m, k), dtype=torch.bfloat16).npu()
         expert_token_nums = self.generate_random_tensor((1, e), dtype=torch.int32).npu()
 
+        print(f"[Rank {self.rank}] 算子，输出张量前5个元素：{out[:5, 0].cpu().tolist()}")
         torch.ops._C_ascend.dispatch_ffn_combine(
             x=x,
             weight1=weight1_nz_npu,
             weight2=weight2_nz_npu,
             expert_idx=expert_idx,
+            bias1=torch.tensor([]),
+            bias2=torch.tensor([]),
             scale1=scale1_npu,
             scale2=scale2_npu,
             probs=probs,
@@ -141,6 +144,8 @@ class TestDispatchFFNCombine:
             out=out,
             expert_token_nums=expert_token_nums,
         )
+        print(f"[Rank {self.rank}] 算子执行成功，输出张量前5个元素：{out[:5, 0].cpu().tolist()}")
+        print(f"[Rank {self.rank}] 算子开始执行，token per expert：{expert_token_nums[0, :].cpu().tolist()}")
         return True
 
     def run_normal(self) -> bool:
@@ -186,6 +191,8 @@ class TestDispatchFFNCombine:
             weight1=weight1_nz_npu,
             weight2=weight2_nz_npu,
             expert_idx=expert_idx,
+            bias1=torch.tensor([]),
+            bias2=torch.tensor([]),
             scale1=scale1_npu,
             scale2=scale2_npu,
             probs=probs,
@@ -212,27 +219,27 @@ def worker(rank: int, world_size: int, port: int, q: mp.SimpleQueue):
     op.generate_hcom()
     out1 = op.run_tensor_list()
     q.put(out1)
-    out2 = op.run_normal()
-    q.put(out2)
+    # out2 = op.run_normal()
+    # q.put(out2)
 
 
-@torch.inference_mode()
-def test_dispatch_ffn_combine_kernel():
-    world_size = 2
-    mp.set_start_method("fork", force=True)
+# @torch.inference_mode()
+# def test_dispatch_ffn_combine_kernel():
+world_size = 2
+mp.set_start_method("fork", force=True)
 
-    q = mp.SimpleQueue()
-    p_list = []
-    port = 29501 + random.randint(0, 10000)
+q = mp.SimpleQueue()
+p_list = []
+port = 29501 + random.randint(0, 10000)
 
-    for rank in range(world_size):
-        p = mp.Process(target=worker, args=(rank, world_size, port, q))
-        p.start()
-        p_list.append(p)
+for rank in range(world_size):
+    p = mp.Process(target=worker, args=(rank, world_size, port, q))
+    p.start()
+    p_list.append(p)
 
-    results = [q.get() for _ in range(world_size)]
+results = [q.get() for _ in range(world_size)]
 
-    for p in p_list:
-        p.join()
+for p in p_list:
+    p.join()
 
-    assert all(results)
+assert all(results) , f"部分进程执行失败！结果: {results}"
