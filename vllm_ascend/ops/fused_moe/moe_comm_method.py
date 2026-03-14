@@ -366,6 +366,8 @@ class FusedMC2CommImpl(MoECommMethod):
                 expert_idx=topk_ids,
                 scale1=w1_scale,
                 scale2=w2_scale,
+                bias1=w1_scale_bias,
+                bias2=w2_scale_bias,
                 probs=topk_weights.to(torch.float32),
                 group=self.token_dispatcher.moe_all_to_all_group_name,
                 max_output_size=65536,
